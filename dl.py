@@ -1,0 +1,168 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.metrics import classification_report, confusion_matrix
+import tensorflow as tf
+from tensorflow.keras import layers, models, callbacks
+from tensorflow.keras.datasets import cifar10
+
+
+print("Loading CIFAR-10 dataset...")
+(X_train, y_train), (X_test, y_test) = cifar10.load_data()
+
+# Flatten label arrays from (N, 1) to (N,)
+y_train = y_train.squeeze()
+y_test = y_test.squeeze()
+
+class_names = [
+    'Airplane', 'Automobile', 'Bird', 'Cat', 'Deer',
+    'Dog', 'Frog', 'Horse', 'Ship', 'Truck'
+]
+
+# Normalize pixel values from [0, 255] to [0, 1]
+X_train = X_train.astype('float32') / 255.0
+X_test = X_test.astype('float32') / 255.0
+
+print(f"Training samples: {X_train.shape[0]}, Image shape: {X_train.shape[1:]}")
+print(f"Testing samples:  {X_test.shape[0]}")
+
+
+data_augmentation = models.Sequential([
+    layers.RandomFlip("horizontal"),
+    layers.RandomRotation(0.1),
+    layers.RandomZoom(0.1),
+], name="data_augmentation")
+
+model = models.Sequential([
+    layers.Input(shape=(32, 32, 3)),
+    data_augmentation,
+
+    # Convolutional Block 1
+    layers.Conv2D(32, (3, 3), padding='same', activation='relu'),
+    layers.BatchNormalization(),
+    layers.Conv2D(32, (3, 3), padding='same', activation='relu'),
+    layers.BatchNormalization(),
+    layers.MaxPooling2D((2, 2)),
+    layers.Dropout(0.2),
+
+    # Convolutional Block 2
+    layers.Conv2D(64, (3, 3), padding='same', activation='relu'),
+    layers.BatchNormalization(),
+    layers.Conv2D(64, (3, 3), padding='same', activation='relu'),
+    layers.BatchNormalization(),
+    layers.MaxPooling2D((2, 2)),
+    layers.Dropout(0.3),
+
+    # Convolutional Block 3
+    layers.Conv2D(128, (3, 3), padding='same', activation='relu'),
+    layers.BatchNormalization(),
+    layers.Conv2D(128, (3, 3), padding='same', activation='relu'),
+    layers.BatchNormalization(),
+    layers.MaxPooling2D((2, 2)),
+    layers.Dropout(0.4),
+
+    # Fully Connected Classification Head
+    layers.Flatten(),
+    layers.Dense(128, activation='relu'),
+    layers.BatchNormalization(),
+    layers.Dropout(0.5),
+    layers.Dense(10, activation='softmax')
+])
+
+model.compile(
+    optimizer='adam',
+    loss='sparse_categorical_crossentropy',
+    metrics=['accuracy']
+)
+
+model.summary()
+
+
+early_stop = callbacks.EarlyStopping(
+    monitor='val_loss',
+    patience=5,
+    restore_best_weights=True
+)
+
+lr_scheduler = callbacks.ReduceLROnPlateau(
+    monitor='val_loss',
+    factor=0.5,
+    patience=2,
+    verbose=1
+)
+
+print("\nInitiating model training...")
+history = model.fit(
+    X_train, y_train,
+    epochs=25,
+    batch_size=64,
+    validation_split=0.2,
+    callbacks=[early_stop, lr_scheduler]
+)
+
+
+test_loss, test_acc = model.evaluate(X_test, y_test, verbose=0)
+print(f"\nTest Loss:     {test_loss:.4f}")
+print(f"Test Accuracy: {test_acc * 100:.2f}%")
+
+# Generate predictions
+y_pred_probs = model.predict(X_test)
+y_pred = np.argmax(y_pred_probs, axis=1)
+
+print("\nDetailed Classification Report:")
+print(classification_report(y_test, y_pred, target_names=class_names))
+
+# Plot 1: Training vs. Validation Accuracy & Loss
+plt.figure(figsize=(12, 4))
+
+plt.subplot(1, 2, 1)
+plt.plot(history.history['accuracy'], label='Training Accuracy')
+plt.plot(history.history['val_accuracy'], label='Validation Accuracy')
+plt.title('CNN Model Accuracy')
+plt.xlabel('Epoch')
+plt.ylabel('Accuracy')
+plt.legend()
+plt.grid(True, linestyle='--', alpha=0.5)
+
+plt.subplot(1, 2, 2)
+plt.plot(history.history['loss'], label='Training Loss')
+plt.plot(history.history['val_loss'], label='Validation Loss')
+plt.title('CNN Model Loss (Categorical Cross-Entropy)')
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+plt.legend()
+plt.grid(True, linestyle='--', alpha=0.5)
+
+plt.tight_layout()
+plt.savefig('training_curves.png', dpi=300)
+plt.show()
+
+# Plot 2: Confusion Matrix Heatmap
+cm = confusion_matrix(y_test, y_pred)
+plt.figure(figsize=(10, 8))
+sns.heatmap(
+    cm, annot=True, fmt='d', cmap='Blues',
+    xticklabels=class_names, yticklabels=class_names
+)
+plt.title('CIFAR-10 Classification Confusion Matrix')
+plt.xlabel('Predicted Class')
+plt.ylabel('Actual Ground Truth Class')
+plt.tight_layout()
+plt.savefig('confusion_matrix.png', dpi=300)
+plt.show()
+
+# Plot 3: Visual Sample Predictions (Actual vs. Predicted)
+plt.figure(figsize=(12, 6))
+for i in range(10):
+    plt.subplot(2, 5, i + 1)
+    plt.imshow(X_test[i])
+    pred_label = class_names[y_pred[i]]
+    true_label = class_names[y_test[i]]
+    color = 'green' if y_pred[i] == y_test[i] else 'red'
+    plt.title(f"Pred: {pred_label}\nTrue: {true_label}", color=color, fontsize=10)
+    plt.axis('off')
+
+plt.suptitle('Sample Test Predictions (Green = Correct, Red = Incorrect)', fontsize=13)
+plt.tight_layout()
+plt.savefig('sample_predictions.png', dpi=300)
+plt.show()
